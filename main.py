@@ -25,26 +25,11 @@ SAMPLE_RATE = 44100
 TEMP_AUDIO_FILE = "temp_audio.wav"
 
 # --- Shared State Variables (for threading) ---
-app_state = "ready"  # States: ready, recording, processing, result
+app_state = "ready"
 display_text = ""
 lock = threading.Lock()
 
-# --- NEW: Font-finding Helper Function ---
-def find_font():
-    """Finds a suitable font that supports Thai characters on the system."""
-    font_paths = [
-        "/usr/share/fonts/truetype/laksaman/Laksaman.ttf",  # Common on Raspberry Pi OS
-        "C:/Windows/Fonts/leelawadee.ttf",                  # Common on Windows
-        "C:/Windows/Fonts/leela.ttf"
-    ]
-    for path in font_paths:
-        if os.path.exists(path):
-            print(f"INFO: Found font at {path}")
-            return path
-    print("WARNING: No Thai-supported system font found. Using default font.")
-    return None # Fallback to Pygame's default
 
-# --- All backend functions are unchanged and are omitted for brevity ---
 config = configparser.ConfigParser();
 config.read('config.ini')
 GEMINI_MODEL_NAME = config.get('gemini_settings', 'gemini_model')
@@ -65,11 +50,22 @@ def transcribe_audio(genai, file_path, model_name):
 
 
 def translate_text(genai, text, target_language, dialect, model_name):
+    """Translates text using the specified Gemini model and dialect instructions."""
     constraint = "Your response must contain ONLY the translated text and nothing else."
+
     if target_language == "thai":
-        prompt = (f"Translate this to {dialect} Thai: '{text}'. {constraint}")
-    else:  # English
+        # --- THIS IS THE FIX ---
+        # We now check for the 'none' case specifically.
+        if dialect == "none":
+            prompt = (f"Translate this to standard Thai: '{text}'. {constraint}")
+        else:
+            prompt = (f"Translate this to {dialect} Thai (e.g., Lanna or Pak Tai): '{text}'. {constraint}")
+
+    elif target_language == "english":
         prompt = (f"Translate this to English: '{text}'. {constraint}")
+    else:
+        raise ValueError("Unsupported target language.")
+
     model = genai.GenerativeModel(model_name=model_name)
     response = model.generate_content(prompt)
     return response.text.strip()
@@ -79,23 +75,22 @@ def detect_language(text):
     return 'thai' if any('\u0E00' <= char <= '\u0E7F' for char in text) else 'english'
 
 
-# --- The Main Worker Thread Function (CORRECTED) ---
+# --- The Main Worker Thread Function (Unchanged) ---
 def translation_worker():
     global app_state, display_text
-
-    # === STEP 1: RECORDING IS NOW INSIDE THE THREAD ===
     with lock:
         app_state = "recording"
-
     recorded_chunks = []
     try:
         stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1)
         stream.start()
-        while True:
-            is_pressed = not GPIO.input(BUTTON_PIN) if is_raspberry_pi else pygame.key.get_pressed()[pygame.K_LSHIFT] or \
-                                                                            pygame.key.get_pressed()[pygame.K_RSHIFT]
-            if not is_pressed:
-                break
+        is_still_pressed = True
+        while is_still_pressed:
+            if is_raspberry_pi:
+                is_still_pressed = not GPIO.input(BUTTON_PIN)
+            else:
+                is_still_pressed = pygame.key.get_pressed()[pygame.K_LSHIFT] or pygame.key.get_pressed()[
+                    pygame.K_RSHIFT]
             data, _ = stream.read(1024)
             recorded_chunks.append(data)
         stream.stop()
@@ -104,31 +99,22 @@ def translation_worker():
         with lock:
             app_state = "ready"
         return
-
     if not recorded_chunks:
-        with lock:
-            app_state = "ready"
+        with lock: app_state = "ready"
         return
-
-    # === STEP 2: PROCESSING IS ALSO IN THE THREAD ===
     with lock:
         app_state = "processing"
-
     try:
         genai = configure_gemini()
         recording = np.concatenate(recorded_chunks, axis=0)
         sf.write(TEMP_AUDIO_FILE, recording, SAMPLE_RATE)
-
         source_text = transcribe_audio(genai, TEMP_AUDIO_FILE, model_name=GEMINI_MODEL_NAME)
         source_language = detect_language(source_text)
-
         target_lang = 'thai' if source_language == 'english' else 'english'
         translated_text = translate_text(genai, source_text, target_lang, TARGET_DIALECT.lower(), GEMINI_MODEL_NAME)
-
         with lock:
             display_text = translated_text
             app_state = "result"
-
     except Exception as e:
         print(f"Error in worker thread: {e}")
         with lock:
@@ -139,7 +125,7 @@ def translation_worker():
             os.remove(TEMP_AUDIO_FILE)
 
 
-# --- Main GUI Application ---
+# --- Main GUI Application (Updated) ---
 def main():
     global app_state, display_text
 
@@ -151,63 +137,72 @@ def main():
 
     screen = pygame.display.set_mode((800, 480))
     pygame.display.set_caption("Audio Translator")
-    font_large = pygame.font.Font(None, 60)
-    font_small = pygame.font.Font(None, 24)
-    clock = pygame.time.Clock()
 
-    result_display_start_time = 0  # Timer for the result screen
+    # --- Font Loading: Load the bundled Noto Sans Thai font ---
+    try:
+        font_path = "NotoSansThai-Regular.ttf"
+        font_large = pygame.font.Font(font_path, 52)
+        font_small = pygame.font.Font(font_path, 24)
+    except FileNotFoundError:
+        print("WARNING: NotoSansThai-Regular.ttf not found. Falling back to default font.")
+        # Fallback if the font file is missing
+        font_large = pygame.font.Font(None, 52)
+        font_small = pygame.font.Font(None, 24)
+
+    clock = pygame.time.Clock()
 
     running = True
     while running:
+        # --- Event Handling (for quitting) ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 running = False
 
-        with lock:
-            ready_to_start = (app_state == "ready")
-
-        if ready_to_start:
-            keys = pygame.key.get_pressed()
-            is_triggered = (not GPIO.input(BUTTON_PIN)) if is_raspberry_pi else (
-                        keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
-            if is_triggered:
-                worker = threading.Thread(target=translation_worker)
-                worker.start()
-
-        # --- Drawing to the Screen ---
-        screen.fill((20, 20, 30))  # Dark blue background
-
+        # --- Read shared state from the worker thread ---
         with lock:
             current_state = app_state;
             current_text = display_text
 
+        # --- Check for input triggers based on the current state ---
+        keys = pygame.key.get_pressed()
+        is_triggered = (not GPIO.input(BUTTON_PIN)) if is_raspberry_pi else (
+                    keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
+
+        if current_state == "ready" and is_triggered:
+            worker = threading.Thread(target=translation_worker)
+            worker.start()
+
+        # --- CONTROL FLOW FIX: Check for a press during the "result" state ---
+        if current_state == "result" and is_triggered:
+            # Add a small delay to prevent accidental double-presses
+            pygame.time.wait(200)
+            with lock:
+                app_state = "ready"
+
+        # --- Drawing to the Screen ---
+        screen.fill((20, 20, 30))
+
         if current_state == "ready":
-            status_surface = font_large.render("Ready", True, (100, 255, 100))  # Light Green
+            status_surface = font_large.render("Ready", True, (100, 255, 100))
             instruction_surface = font_small.render("Hold Button or Shift to Record", True, (200, 200, 200))
             screen.blit(status_surface, status_surface.get_rect(center=(400, 200)))
             screen.blit(instruction_surface, instruction_surface.get_rect(center=(400, 280)))
         elif current_state == "recording":
-            status_surface = font_large.render("Recording...", True, (255, 80, 80))  # Light Red
+            status_surface = font_large.render("Recording...", True, (255, 80, 80))
             screen.blit(status_surface, status_surface.get_rect(center=(400, 240)))
         elif current_state == "processing":
-            status_surface = font_large.render("Processing...", True, (255, 255, 100))  # Light Yellow
+            status_surface = font_large.render("Processing...", True, (255, 255, 100))
             screen.blit(status_surface, status_surface.get_rect(center=(400, 240)))
         elif current_state == "result":
-            # === STEP 3: NON-BLOCKING TIMER FOR RESULTS ===
-            if result_display_start_time == 0:
-                result_display_start_time = pygame.time.get_ticks()
+            instruction_surface = font_small.render("Press again to continue", True, (200, 200, 200))
+            screen.blit(instruction_surface, instruction_surface.get_rect(center=(400, 440)))
 
-            wrapped_text = textwrap.wrap(current_text, width=30)
-            y_offset = 240 - (len(wrapped_text) * 35)  # Center vertically
+            wrapped_text = textwrap.wrap(current_text, width=28)
+            y_offset = 240 - (len(wrapped_text) * 35)
             for line in wrapped_text:
-                result_surface = font_large.render(line, True, (100, 200, 255))  # Light Blue
+                result_surface = font_large.render(line, True, (100, 200, 255))
                 screen.blit(result_surface, result_surface.get_rect(center=(400, y_offset)))
                 y_offset += 70
-
-            if pygame.time.get_ticks() - result_display_start_time > 5000:  # 5 seconds
-                with lock:
-                    app_state = "ready"
-                result_display_start_time = 0
 
         pygame.display.flip()
         clock.tick(30)
