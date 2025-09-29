@@ -4,14 +4,14 @@ echo "--- Starting Full Translator Project Setup ---"
 cd "$(dirname "$0")"
 
 # --- Step 1: Install System Dependencies ---
-echo "[1/3] Updating package list and installing system dependencies..."
+echo "[1/4] Updating package list and installing system dependencies..."
 sudo apt-get update
-# ADDED python3-dev to this line
-sudo apt-get install -y portaudio19-dev python3-dev
+# ADDED minimal GUI components for Pygame on a "Light" OS
+sudo apt-get install -y portaudio19-dev python3-dev xserver-xorg xinit openbox xserver-xorg-input-all
 echo "System dependencies installed."
 
 # --- Step 2: Install Python Dependencies ---
-echo "[2/3] Creating virtual environment and installing packages..."
+echo "[2/4] Creating virtual environment and installing packages..."
 if [ ! -d ".venv" ]; then
     python3 -m venv .venv
 fi
@@ -20,22 +20,35 @@ pip install -r requirements.txt
 deactivate
 echo "Python libraries installed successfully."
 
-# --- Step 3: Configure Autostart ---
-echo "[3/3] Configuring application to run on boot..."
-AUTOSTART_FILE="$HOME/.config/lxsession/LXDE-pi/autostart"
+# --- Step 3: Create the systemd Service File ---
+echo "[3/4] Creating systemd service for autostart..."
+SERVICE_FILE="/etc/systemd/system/translator.service"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
-LAUNCHER_CMD="@lxterminal -e $LAUNCHER_PATH"
 
-mkdir -p "$(dirname "$AUTOSTART_FILE")"
-touch "$AUTOSTART_FILE"
+# Use a 'here document' to write the service file contents
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=Audio Translator Service
+After=network-online.target sound.target
 
-if ! grep -qF "$LAUNCHER_CMD" "$AUTOSTART_FILE"; then
-    echo "Adding launcher to autostart file..."
-    echo "$LAUNCHER_CMD" >> "$AUTOSTART_FILE"
-    echo "Autostart configured."
-else
-    echo "Application is already configured to autostart."
-fi
+[Service]
+ExecStart=/usr/bin/xinit $LAUNCHER_PATH
+WorkingDirectory=$(pwd)
+User=pi
+Restart=on-failure
+Environment="DISPLAY=:0"
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+echo "Service file created."
+
+# --- Step 4: Enable the Service ---
+echo "[4/4] Enabling the service to run on boot..."
+sudo systemctl daemon-reload
+sudo systemctl enable translator.service
+echo "Service enabled."
 
 echo ""
 echo "--- ✅ Installation Complete ---"
