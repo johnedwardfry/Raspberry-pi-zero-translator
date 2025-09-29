@@ -20,7 +20,7 @@ import pygame
 
 # --- Hardware & App Config ---
 RECORD_BUTTON_PIN = 17
-ACTION_BUTTON_PIN = 22
+ACTION_BUTTON_PIN = 22  # Formerly toggle button, now general action
 SAMPLE_RATE = 16000
 TEMP_AUDIO_FILE = "temp_audio.wav"
 CHUNK = 1024
@@ -32,7 +32,7 @@ app_state = "ready"
 display_text = ""
 lock = threading.Lock()
 
-# --- NEW: UI Text and Dialect Management ---
+# --- UI Text and Dialect Management ---
 STATUS_TEXTS = {
     'ready': {'en': "Ready", 'th': "พร้อม"},
     'recording': {'en': "Recording...", 'th': "กำลังบันทึก..."},
@@ -46,7 +46,7 @@ DIALECT_NAMES = {
 }
 
 
-# (Helper functions find_font, config loader, etc., are unchanged and omitted for brevity)
+# --- Helper Function to Find a Thai-Supporting Font ---
 def find_font():
     if os.path.exists("NotoSansThai-Regular.ttf"): return "NotoSansThai-Regular.ttf"
     font_paths = ["/usr/share/fonts/truetype/laksaman/Laksaman.ttf", "C:/Windows/Fonts/leelawadee.ttf",
@@ -57,20 +57,23 @@ def find_font():
     return None
 
 
+# --- Configuration Loader ---
 config = configparser.ConfigParser();
 config.read('config.ini')
 GEMINI_MODEL_NAME = config.get('gemini_settings', 'gemini_model')
 INITIAL_DIALECT = config.get('gemini_settings', 'target_dialect', fallback='northern')
 
 
+# --- Backend API and Logic Functions ---
 def configure_gemini():
     import google.generativeai as genai;
     genai.configure(api_key=config.get('secrets', 'google_api_key'));
     return genai
 
 
-def detect_language(text):
-    return 'thai' if any(r'\u0E00' <= char <= r'\u0E7F' for char in text) else 'english'
+def detect_language(text: str) -> str:
+    # Thai Unicode block: 0x0E00–0x0E7F
+    return 'thai' if any(0x0E00 <= ord(c) <= 0x0E7F for c in text) else 'english'
 
 
 def speak_text(text, lang='th'):
@@ -93,13 +96,13 @@ def speak_text(text, lang='th'):
         if os.path.exists(TTS_FILE): os.remove(TTS_FILE)
 
 
-# --- The Main Worker Thread Function (Corrected) ---
+# --- The Main Worker Thread Function ---
 def translation_worker(dialect_to_use):
     global app_state, display_text
     with lock:
         app_state = "recording"
 
-    audio_frames = []
+    audio_frames = [];
     p = pyaudio.PyAudio()
     try:
         stream = p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE, input=True, frames_per_buffer=CHUNK)
@@ -108,33 +111,27 @@ def translation_worker(dialect_to_use):
             if is_raspberry_pi:
                 is_still_pressed = not GPIO.input(RECORD_BUTTON_PIN)
             else:
-                pygame.event.pump()
-                is_still_pressed = pygame.key.get_pressed()[pygame.K_LSHIFT] or pygame.key.get_pressed()[
-                    pygame.K_RSHIFT]
-            data = stream.read(CHUNK, exception_on_overflow=False)
+                pygame.event.pump(); is_still_pressed = pygame.key.get_pressed()[pygame.K_LSHIFT] or \
+                                                        pygame.key.get_pressed()[pygame.K_RSHIFT]
+            data = stream.read(CHUNK, exception_on_overflow=False);
             audio_frames.append(data)
-        stream.stop_stream()
-        stream.close()
+        stream.stop_stream();
+        stream.close();
         p.terminate()
     except Exception as e:
-        # --- THIS BLOCK IS THE FIX ---
-        print(f"Audio recording error: {e}")
+        print(f"Audio recording error: {e}");
         p.terminate()
         with lock:
-            app_state = "ready"
-        return
-        # --- END OF FIX ---
+            app_state = "ready"; return
 
     if not audio_frames or len(audio_frames) < int(SAMPLE_RATE / CHUNK * 0.2):
-        print("No significant audio recorded.")
-        with lock:
-            app_state = "ready"
-        return
+        print("No significant audio recorded.");
+        with lock: app_state = "ready"; return
 
     with wave.open(TEMP_AUDIO_FILE, 'wb') as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(p.get_sample_size(FORMAT))
-        wf.setframerate(SAMPLE_RATE)
+        wf.setnchannels(CHANNELS);
+        wf.setsampwidth(p.get_sample_size(FORMAT));
+        wf.setframerate(SAMPLE_RATE);
         wf.writeframes(b''.join(audio_frames))
 
     with lock:
@@ -159,18 +156,15 @@ def translation_worker(dialect_to_use):
         source_language = 'english' if result_language == 'thai' else 'thai'
         logging.info(f"Source ({source_language}) | Translated ({result_language}): {translated_text}")
         with lock:
-            display_text = translated_text
-            app_state = "result"
+            display_text = translated_text; app_state = "result"
 
     except Exception as e:
-        logging.error(f"Error in worker thread: {e}")
+        logging.error(f"Error in worker thread: {e}");
         print(f"Error in worker thread: {e}")
         with lock:
-            display_text = "An error occurred."
-            app_state = "result"
+            display_text = "An error occurred."; app_state = "result"
     finally:
-        if os.path.exists(TEMP_AUDIO_FILE):
-            os.remove(TEMP_AUDIO_FILE)
+        if os.path.exists(TEMP_AUDIO_FILE): os.remove(TEMP_AUDIO_FILE)
 
 
 # --- Main GUI Application ---
@@ -183,7 +177,7 @@ def main():
     pygame.init()
 
     if is_raspberry_pi:
-        GPIO.setwarnings(False)
+        GPIO.setwarnings(False);
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(RECORD_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(ACTION_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -192,11 +186,11 @@ def main():
     pygame.display.set_caption("Audio Translator")
     font_path = find_font()
     try:
-        font_large = pygame.font.Font(font_path, 52)
+        font_large = pygame.font.Font(font_path, 52);
         font_small = pygame.font.Font(font_path, 24)
     except Exception:
-        print("Error loading custom font, using default.")
-        font_large = pygame.font.Font(None, 52)
+        print("Error loading custom font, using default.");
+        font_large = pygame.font.Font(None, 52);
         font_small = pygame.font.Font(None, 24)
 
     clock = pygame.time.Clock()
@@ -205,16 +199,16 @@ def main():
         current_dialect_index = DIALECTS.index(INITIAL_DIALECT)
     except ValueError:
         current_dialect_index = 0
-    action_click_count = 0
-    last_action_click_time = 0
-    prev_action_state = False
+    action_click_count = 0;
+    last_action_click_time = 0;
+    prev_action_state = False;
     result_display_start_time = 0
 
     running = True
     while running:
         for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                running = False
+            if event.type == pygame.QUIT or (
+                    event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE): running = False
             if not is_raspberry_pi and event.type == pygame.KEYDOWN and (
                     event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER):
                 current_time = time.time()
@@ -224,7 +218,7 @@ def main():
                     action_click_count += 1
                 last_action_click_time = current_time
                 if action_click_count >= 3:
-                    current_dialect_index = (current_dialect_index + 1) % len(DIALECTS)
+                    current_dialect_index = (current_dialect_index + 1) % len(DIALECTS);
                     action_click_count = 0
 
         if is_raspberry_pi:
@@ -237,23 +231,22 @@ def main():
                     action_click_count += 1
                 last_action_click_time = current_time
                 if action_click_count >= 3:
-                    current_dialect_index = (current_dialect_index + 1) % len(DIALECTS)
+                    current_dialect_index = (current_dialect_index + 1) % len(DIALECTS);
                     action_click_count = 0
             prev_action_state = action_state
 
         with lock:
-            current_state = app_state
-            current_text = display_text
+            current_state = app_state; current_text = display_text
         keys = pygame.key.get_pressed()
         record_triggered = (not GPIO.input(RECORD_BUTTON_PIN)) if is_raspberry_pi else (
                     keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
 
         if current_state == "ready" and record_triggered:
-            worker = threading.Thread(target=translation_worker, args=(DIALECTS[current_dialect_index],))
+            worker = threading.Thread(target=translation_worker, args=(DIALECTS[current_dialect_index],));
             worker.start()
 
         if current_state == "result" and record_triggered:
-            pygame.time.wait(200)
+            pygame.time.wait(200);
             with lock: app_state = "ready"
 
         screen.fill((20, 20, 30))
@@ -290,31 +283,28 @@ def main():
         elif current_state == "result":
             if result_display_start_time == 0:
                 result_display_start_time = pygame.time.get_ticks()
-                if detect_language(current_text) == 'thai':
-                    tts_thread = threading.Thread(target=speak_text, args=(current_text, 'th'))
-                    tts_thread.start()
-            instruction_surface = font_small.render("Press Record Button to Continue", True, (200, 200, 200))
+                lang_code = 'th' if detect_language(current_text) == 'thai' else 'en'
+                print(f"TTS speaking in {lang_code}: {current_text[:60]}...")
+                tts_thread = threading.Thread(target=speak_text, args=(current_text, lang_code));
+                tts_thread.start()
+            instruction_surface = font_small.render("Press Record Button to Continue", True, (200, 200, 200));
             screen.blit(instruction_surface,
                         instruction_surface.get_rect(center=(screen.get_width() // 2, screen.get_height() - 40)))
             wrapped_text = textwrap.wrap(current_text, width=28)
             y_offset = (screen.get_height() // 2) - (len(wrapped_text) * (font_large.get_height() - 20) / 2)
             for line in wrapped_text:
-                result_surface = font_large.render(line, True, (100, 200, 255))
-                screen.blit(result_surface, result_surface.get_rect(center=(screen.get_width() // 2, y_offset)))
+                result_surface = font_large.render(line, True, (100, 200, 255));
+                screen.blit(result_surface, result_surface.get_rect(center=(screen.get_width() // 2, y_offset)));
                 y_offset += font_large.get_height()
 
             time_elapsed = pygame.time.get_ticks() - result_display_start_time
             if time_elapsed > 10000 or record_triggered:
-                with lock:
-                    app_state = "ready"
-                result_display_start_time = 0
+                with lock: app_state = "ready"; result_display_start_time = 0
 
         pygame.display.flip()
         clock.tick(30)
-
     pygame.quit()
-    if is_raspberry_pi:
-        GPIO.cleanup()
+    if is_raspberry_pi: GPIO.cleanup()
 
 
 if __name__ == "__main__":
