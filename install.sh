@@ -6,7 +6,8 @@ cd "$(dirname "$0")"
 # --- Step 1: Install System Dependencies ---
 echo "[1/4] Updating package list and installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y portaudio19-dev python3-dev xserver-xorg xinit openbox xserver-xorg-input-all
+# ADDED 'lightdm' to ensure graphical boot can be configured
+sudo apt-get install -y portaudio19-dev python3-dev xserver-xorg xinit openbox xserver-xorg-input-all lightdm
 echo "System dependencies installed."
 
 # --- Step 2: Install Python Dependencies ---
@@ -45,7 +46,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable translator.service
 echo "Service enabled."
 
-# --- NEW: Step 4: Verify Boot Configuration ---
+# --- Step 4: Verify Boot Configuration ---
 echo "[4/4] Verifying boot configuration..."
 # B4 is the code for "Boot to Desktop with Autologin"
 if raspi-config nonint get_boot_behaviour | grep -q "B4"; then
