@@ -3,10 +3,11 @@
 echo "--- Starting Full Translator Project Setup ---"
 cd "$(dirname "$0")"
 
-# --- NEW: Step 1: Install System Dependencies ---
+# --- Step 1: Install System Dependencies ---
 echo "[1/3] Updating package list and installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y portaudio19-dev
+# ADDED python3-dev to this line
+sudo apt-get install -y portaudio19-dev python3-dev
 echo "System dependencies installed."
 
 # --- Step 2: Install Python Dependencies ---
