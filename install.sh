@@ -1,10 +1,10 @@
 #!/bin/bash
 
-echo "--- Starting Full Translator Project Setup ---"
+echo "--- Starting Full Translator Project Setup (Kiosk Mode) ---"
 cd "$(dirname "$0")"
 
-# --- Step 1: Install System Dependencies ---
-echo "[1/4] Updating package list and installing system dependencies..."
+# --- Step 1: Install All System Dependencies ---
+echo "[1/4] Installing system dependencies (GUI, audio, login manager)..."
 sudo apt-get update
 sudo apt-get install -y portaudio19-dev python3-dev xserver-xorg xinit openbox xserver-xorg-input-all lightdm
 echo "System dependencies installed."
@@ -17,49 +17,52 @@ fi
 source .venv/bin/activate
 pip install -r requirements.txt
 deactivate
-echo "Python libraries installed successfully."
+echo "Python libraries installed."
 
-# --- Step 3: Create the systemd Service File ---
-echo "[3/4] Creating systemd service for autostart..."
-SERVICE_FILE="/etc/systemd/system/translator.service"
+# --- Step 3: Create the Kiosk Session ---
+echo "[3/4] Creating custom graphical session for the translator..."
+
+# Create a script that lightdm will run
+SESSION_SCRIPT="/usr/local/bin/translator-session"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
 
-# Use a 'here document' to write the service file contents
-# --- THIS BLOCK CONTAINS THE FIX ---
-sudo tee "$SERVICE_FILE" > /dev/null <<EOF
-[Unit]
-Description=Audio Translator Service
-After=network-online.target sound.target
-
-[Service]
-# FIX: Use 'su' to run the entire graphical session as the 'pi' user
-ExecStart=/bin/su - pi -c "/usr/bin/xinit $LAUNCHER_PATH"
-
-WorkingDirectory=$(pwd)
-User=pi
-Restart=on-failure
-Environment="DISPLAY=:0"
-
-[Install]
-WantedBy=graphical.target
+sudo tee "$SESSION_SCRIPT" > /dev/null <<EOF
+#!/bin/bash
+# Run the application launcher
+$LAUNCHER_PATH
 EOF
-# --- END OF FIX ---
 
-echo "Service file created."
+# Make the session script executable
+sudo chmod +x "$SESSION_SCRIPT"
 
-# --- Step 4: Enable the Service and Configure Boot ---
-echo "[4/4] Enabling service and configuring boot..."
-sudo systemctl daemon-reload
-sudo systemctl enable translator.service
+# Create a .desktop file to register the session
+DESKTOP_FILE="/usr/share/xsessions/translator.desktop"
+sudo tee "$DESKTOP_FILE" > /dev/null <<EOF
+[Desktop Entry]
+Name=Translator
+Comment=Custom session for the audio translator
+Exec=/usr/local/bin/translator-session
+Type=Application
+EOF
 
-# B4 is the code for "Boot to Desktop with Autologin"
-if raspi-config nonint get_boot_behaviour | grep -q "B4"; then
-    echo "Boot configuration is correct (Desktop Autologin)."
-else
-    echo "Setting boot configuration to Desktop Autologin..."
-    sudo raspi-config nonint do_boot_behaviour B4
-fi
+echo "Custom session created."
 
+# --- Step 4: Configure LightDM to Autologin to the Kiosk Session ---
+echo "[4/4] Configuring LightDM for automatic login..."
+CONF_DIR="/etc/lightdm/lightdm.conf.d"
+CONF_FILE="$CONF_DIR/60-autologin.conf"
+
+# Create the directory if it doesn't exist
+sudo mkdir -p "$CONF_DIR"
+
+# Create the configuration file
+sudo tee "$CONF_FILE" > /dev/null <<EOF
+[Seat:*]
+autologin-user=pi
+autologin-session=translator
+EOF
+
+echo "Autologin configured."
 echo ""
 echo "--- ✅ Installation Complete ---"
 echo "Next steps:"
