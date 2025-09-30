@@ -310,6 +310,5 @@ def main():
     if is_raspberry_pi: GPIO.cleanup()
 
 
-
 if __name__ == "__main__":
     main()
