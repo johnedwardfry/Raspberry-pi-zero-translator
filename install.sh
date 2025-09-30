@@ -1,36 +1,53 @@
 #!/bin/bash
+set -e
 
-echo "--- Starting Project Setup on Full OS ---"
+echo "--- Starting Full Translator Project Setup (Kiosk Mode) ---"
 cd "$(dirname "$0")"
 
-# --- Step 1: Install Python Dependencies ---
-echo "[1/2] Installing Python packages..."
+# --- Step 1: Install System Dependencies ---
+echo "[1/4] Installing system dependencies (GUI, audio, login manager)..."
 sudo apt-get update
-sudo apt-get install -y python3-pyaudio # Install pyaudio dependency
-python3 -m venv .venv
+sudo apt-get install -y portaudio19-dev python3-dev xserver-xorg xinit openbox xserver-xorg-input-all lightdm
+echo "System dependencies installed."
+
+# --- Step 2: Install Python Dependencies ---
+echo "[2/4] Creating virtual environment and installing packages..."
+if [ ! -d ".venv" ]; then
+    python3 -m venv .venv
+fi
 source .venv/bin/activate
 pip install -r requirements.txt
 deactivate
 echo "Python libraries installed."
 
-# --- Step 2: Configure Desktop Autostart ---
-echo "[2/2] Configuring application to run on boot..."
-AUTOSTART_DIR="$HOME/.config/lxsession/LXDE-pi"
-AUTOSTART_FILE="$AUTOSTART_DIR/autostart"
+# --- Step 3: Create the Kiosk Session ---
+echo "[3/4] Creating custom graphical session for the translator..."
+SESSION_SCRIPT="/usr/local/bin/translator-session"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
 
-# Create the config directory if it doesn't exist
-mkdir -p "$AUTOSTART_DIR"
+sudo tee "$SESSION_SCRIPT" > /dev/null <<EOF
+#!/bin/bash
+$LAUNCHER_PATH
+EOF
+sudo chmod +x "$SESSION_SCRIPT"
 
-# Add the launcher if it's not already there
-if ! grep -qF "$LAUNCHER_PATH" "$AUTOSTART_FILE" 2>/dev/null; then
-    echo "Adding launcher to autostart file..."
-    echo "@$LAUNCHER_PATH" >> "$AUTOSTART_FILE"
-    echo "Autostart configured."
-else
-    echo "Application is already configured to autostart."
-fi
+DESKTOP_FILE="/usr/share/xsessions/translator.desktop"
+sudo tee "$DESKTOP_FILE" > /dev/null <<EOF
+[Desktop Entry]
+Name=Translator
+Comment=Custom session for the audio translator
+Exec=/usr/local/bin/translator-session
+Type=Application
+EOF
+echo "Custom session created."
 
+# --- Step 4: Configure LightDM to Autologin to the Kiosk Session ---
+echo "[4/4] Configuring LightDM for automatic login..."
+sudo sed -i 's/^#?autologin-user=.*/autologin-user=pi/' /etc/lightdm/lightdm.conf
+sudo sed -i 's/^#?autologin-session=.*/autologin-session=translator/' /etc/lightdm/lightdm.conf
+echo "Autologin configured."
 echo ""
 echo "--- ✅ Installation Complete ---"
-echo "Reboot your Raspberry Pi with 'sudo reboot'."
+echo "Next steps:"
+echo "1. Edit the 'config.ini' file to add your API key."
+echo "2. Reboot your Raspberry Pi with 'sudo reboot'."

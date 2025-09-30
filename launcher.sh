@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Navigate to the script's directory
 cd "$(dirname "$0")"
