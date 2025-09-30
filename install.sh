@@ -16,25 +16,33 @@ if [ ! -d ".venv" ]; then
     python3 -m venv .venv
 fi
 source .venv/bin/activate
-pip install -r requirements.txt
+# Check if requirements.txt exists before trying to install
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt
+else
+    echo "WARNING: requirements.txt not found. Skipping pip install."
+fi
 deactivate
 echo "Python libraries installed."
 
 # --- Step 3: Configure Openbox Autostart ---
 echo "[3/3] Configuring Openbox to launch the translator..."
-AUTOSTART_DIR="/home/pi/.config/openbox"
+
+# --- THIS BLOCK CONTAINS THE FIX ---
+# It now uses the $SUDO_USER variable instead of a hardcoded 'pi' username.
+AUTOSTART_DIR="/home/$SUDO_USER/.config/openbox"
 AUTOSTART_FILE="$AUTOSTART_DIR/autostart"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
 
-# Create the directory as the 'pi' user if it doesn't exist
-sudo -u pi mkdir -p "$AUTOSTART_DIR"
+# Create the directory as the correct user
+sudo -u $SUDO_USER mkdir -p "$AUTOSTART_DIR"
 
-# Create the autostart file with the command to run our launcher
-# The '&' at the end is important to run it in the background
-sudo -u pi tee "$AUTOSTART_FILE" > /dev/null <<EOF
+# Create the autostart file as the correct user
+sudo -u $SUDO_USER tee "$AUTOSTART_FILE" > /dev/null <<EOF
 # Launch the translator application
 $LAUNCHER_PATH &
 EOF
+# --- END OF FIX ---
 
 echo "Autostart configured."
 echo ""
