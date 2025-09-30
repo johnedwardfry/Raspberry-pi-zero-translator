@@ -22,13 +22,21 @@ echo "Python libraries installed."
 
 # --- Step 3: Create the Kiosk Session ---
 echo "[3/4] Creating custom graphical session for the translator..."
+
+# --- THIS BLOCK CONTAINS THE FIX ---
+# We now create a more robust session that starts openbox first.
 SESSION_SCRIPT="/usr/local/bin/translator-session"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
 
 sudo tee "$SESSION_SCRIPT" > /dev/null <<EOF
 #!/bin/bash
+# Start the window manager in the background
+openbox &
+# Run our application launcher in the foreground
 $LAUNCHER_PATH
 EOF
+# --- END OF FIX ---
+
 sudo chmod +x "$SESSION_SCRIPT"
 
 DESKTOP_FILE="/usr/share/xsessions/translator.desktop"
@@ -49,5 +57,5 @@ echo "Autologin configured."
 echo ""
 echo "--- ✅ Installation Complete ---"
 echo "Next steps:"
-echo "1. Edit the 'config.ini' file to add your API key."
+echo "1. If you haven't already, edit the 'config.ini' file to add your API key."
 echo "2. Reboot your Raspberry Pi with 'sudo reboot'."
