@@ -20,7 +20,7 @@ import pygame
 
 # --- Hardware & App Config ---
 RECORD_BUTTON_PIN = 17
-ACTION_BUTTON_PIN = 22  # Formerly toggle button, now general action
+ACTION_BUTTON_PIN = 22
 SAMPLE_RATE = 16000
 TEMP_AUDIO_FILE = "temp_audio.wav"
 CHUNK = 1024
@@ -72,7 +72,6 @@ def configure_gemini():
 
 
 def detect_language(text: str) -> str:
-    # Thai Unicode block: 0x0E00–0x0E7F
     return 'thai' if any(0x0E00 <= ord(c) <= 0x0E7F for c in text) else 'english'
 
 
@@ -96,7 +95,7 @@ def speak_text(text, lang='th'):
         if os.path.exists(TTS_FILE): os.remove(TTS_FILE)
 
 
-# --- The Main Worker Thread Function ---
+# --- The Main Worker Thread Function (Corrected) ---
 def translation_worker(dialect_to_use):
     global app_state, display_text
     with lock:
@@ -119,14 +118,18 @@ def translation_worker(dialect_to_use):
         stream.close();
         p.terminate()
     except Exception as e:
-        print(f"Audio recording error: {e}");
+        # --- THIS BLOCK IS THE FIX ---
+        print(f"Audio recording error: {e}")
         p.terminate()
         with lock:
-            app_state = "ready"; return
+            app_state = "ready"
+        return
+        # --- END OF FIX ---
 
     if not audio_frames or len(audio_frames) < int(SAMPLE_RATE / CHUNK * 0.2):
         print("No significant audio recorded.");
-        with lock: app_state = "ready"; return
+        with lock: app_state = "ready"
+        return
 
     with wave.open(TEMP_AUDIO_FILE, 'wb') as wf:
         wf.setnchannels(CHANNELS);
@@ -305,6 +308,7 @@ def main():
         clock.tick(30)
     pygame.quit()
     if is_raspberry_pi: GPIO.cleanup()
+
 
 
 if __name__ == "__main__":
