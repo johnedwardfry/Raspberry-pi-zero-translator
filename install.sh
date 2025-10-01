@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "--- Starting Full Translator Project Setup (Desktop Autostart) ---"
+echo "--- Starting Full Translator Project Setup (System-wide Autostart) ---"
 cd "$(dirname "$0")"
 
 # --- Step 1: Install System Dependencies ---
@@ -25,32 +25,27 @@ fi
 deactivate
 echo "Python libraries installed."
 
-# --- Step 3: Configure Desktop Autostart ---
-echo "[3/3] Configuring application to run on boot..."
+# --- Step 3: Configure System-Wide Desktop Autostart ---
+echo "[3/3] Configuring system-wide autostart..."
 
 # --- THIS BLOCK CONTAINS THE FINAL FIX ---
-# This creates a .desktop file in the correct autostart directory for the full desktop OS.
-AUTOSTART_DIR="/home/$SUDO_USER/.config/autostart"
-DESKTOP_FILE="$AUTOSTART_DIR/translator.desktop"
+# This edits the main desktop session file directly.
+AUTOSTART_FILE="/etc/xdg/lxsession/LXDE-pi/autostart"
 LAUNCHER_PATH="$(pwd)/launcher.sh"
+LAUNCHER_CMD="@lxterminal -e $LAUNCHER_PATH"
 
-# Create the directory as the correct user
-sudo -u $SUDO_USER mkdir -p "$AUTOSTART_DIR"
-
-# Create the .desktop file as the correct user
-sudo -u $SUDO_USER tee "$DESKTOP_FILE" > /dev/null <<EOF
-[Desktop Entry]
-Name=Audio Translator
-Comment=Starts the audio translator application
-Exec=$LAUNCHER_PATH
-Terminal=true
-Type=Application
-EOF
+# Check if the command is already in the autostart file before adding it
+if ! grep -qF "$LAUNCHER_CMD" "$AUTOSTART_FILE" 2>/dev/null; then
+    echo "Adding launcher to system-wide autostart file..."
+    # Use 'tee -a' with sudo to append the line to the protected file
+    echo "$LAUNCHER_CMD" | sudo tee -a "$AUTOSTART_FILE" > /dev/null
+    echo "Autostart configured."
+else
+    echo "Application is already configured in system-wide autostart."
+fi
 # --- END OF FIX ---
 
-echo "Autostart configured."
 echo ""
 echo "--- ✅ Installation Complete ---"
-echo "Next steps:"
-echo "1. If you haven't already, edit 'config.ini' with your API key."
-echo "2. Reboot your Raspberry Pi with 'sudo reboot'."
+echo "This is the final and most reliable method. Please reboot now."
+echo "Command: sudo reboot"
